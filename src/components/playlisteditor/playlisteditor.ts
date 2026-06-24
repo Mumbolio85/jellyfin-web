@@ -22,12 +22,13 @@ import { pluginManager } from '../pluginManager';
 import { appRouter } from '../router/appRouter';
 
 import 'elements/emby-button/emby-button';
+import 'elements/emby-checkbox/emby-checkbox';
 import 'elements/emby-input/emby-input';
 import 'elements/emby-button/paper-icon-button-light';
-import 'elements/emby-select/emby-select';
 
 import 'material-design-icons-iconfont';
 import '../formdialog.scss';
+import './playlisteditor.scss';
 
 interface DialogElement extends HTMLDivElement {
     playlistId?: string
@@ -45,45 +46,88 @@ interface PlaylistEditorOptions {
 let currentServerId: string;
 
 function onSubmit(this: HTMLElement, e: Event) {
+    e.preventDefault();
+
     const panel = dom.parentWithClass(this, 'dialog') as DialogElement | null;
 
-    if (panel) {
-        const playlistId = panel.querySelector<HTMLSelectElement>('#selectPlaylistToAddTo')?.value;
-
-        loading.show();
-
-        if (playlistId) {
-            userSettings.set('playlisteditor-lastplaylistid', playlistId);
-            addToPlaylist(panel, playlistId)
-                .catch(err => {
-                    console.error('[PlaylistEditor] Failed to add to playlist %s', playlistId, err);
-                    toast(globalize.translate('PlaylistError.AddFailed'));
-                })
-                .finally(loading.hide);
-        } else if (panel.playlistId) {
-            updatePlaylist(panel)
-                .catch(err => {
-                    console.error('[PlaylistEditor] Failed to update to playlist %s', panel.playlistId, err);
-                    toast(globalize.translate('PlaylistError.UpdateFailed'));
-                })
-                .finally(loading.hide);
-        } else {
-            createPlaylist(panel)
-                .catch(err => {
-                    console.error('[PlaylistEditor] Failed to create playlist', err);
-                    toast(globalize.translate('PlaylistError.CreateFailed'));
-                })
-                .finally(loading.hide);
-        }
-    } else {
+    if (!panel) {
         console.error('[PlaylistEditor] Dialog element is missing!');
+        return;
     }
 
-    e.preventDefault();
-    return false;
+    // Edit existing playlist
+    if (panel.playlistId) {
+        loading.show();
+        updatePlaylist(panel)
+            .catch(err => {
+                console.error('[PlaylistEditor] Failed to update playlist %s', panel.playlistId, err);
+                toast(globalize.translate('PlaylistError.UpdateFailed'));
+            })
+            .finally(loading.hide);
+        return;
+    }
+
+    const itemIds = panel.querySelector<HTMLInputElement>('.fldSelectedItemIds')?.value;
+
+    // Standalone create-new-playlist mode (no items being added)
+    if (!itemIds) {
+        loading.show();
+        createPlaylist(panel)
+            .catch(err => {
+                console.error('[PlaylistEditor] Failed to create playlist', err);
+                toast(globalize.translate('PlaylistError.CreateFailed'));
+            })
+            .finally(loading.hide);
+        return;
+    }
+
+    // Add-to-playlist mode: collect all checked targets
+    const checkedIds = Array.from(
+        panel.querySelectorAll<HTMLInputElement>('.chkPlaylist:checked')
+    ).map(cb => cb.value);
+
+    const createNew = panel.querySelector<HTMLInputElement>('#chkCreateNewPlaylist')?.checked;
+
+    if (!checkedIds.length && !createNew) {
+        return;
+    }
+
+    loading.show();
+
+    const ops: Promise<void>[] = checkedIds.map(id => addToPlaylist(panel, id));
+
+    if (createNew) {
+        ops.push(createPlaylist(panel, false));
+    }
+
+    // Persist last used playlist for pre-selection next time
+    const lastId = checkedIds.find(id => id !== 'queue');
+    if (lastId) {
+        userSettings.set('playlisteditor-lastplaylistid', lastId);
+    }
+
+    void Promise.allSettled(ops)
+        .then(results => {
+            const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+
+            failures.forEach(({ reason }) => {
+                console.error('[PlaylistEditor] Failed to add to playlist(s)', reason);
+            });
+
+            if (failures.length) {
+                toast(globalize.translate('PlaylistError.AddFailed'));
+            }
+
+            // Close if at least one operation succeeded
+            if (failures.length < results.length) {
+                panel.submitted = true;
+                dialogHelper.close(panel);
+            }
+        })
+        .finally(loading.hide);
 }
 
-function createPlaylist(dlg: DialogElement) {
+function createPlaylist(dlg: DialogElement, redirect = true): Promise<void> {
     const name = dlg.querySelector<HTMLInputElement>('#txtNewPlaylistName')?.value;
     if (isBlank(name)) return Promise.reject(new Error('Playlist name should not be blank'));
 
@@ -102,10 +146,12 @@ function createPlaylist(dlg: DialogElement) {
             }
         })
         .then(result => {
-            dlg.submitted = true;
-            dialogHelper.close(dlg);
+            if (redirect) {
+                dlg.submitted = true;
+                dialogHelper.close(dlg);
 
-            redirectToPlaylist(result.data.Id);
+                redirectToPlaylist(result.data.Id);
+            }
         });
 }
 
@@ -136,21 +182,16 @@ function updatePlaylist(dlg: DialogElement) {
         });
 }
 
-function addToPlaylist(dlg: DialogElement, id: string) {
+function addToPlaylist(dlg: DialogElement, id: string): Promise<void> {
     const apiClient = ServerConnections.getApiClient(currentServerId);
     const api = toApi(apiClient);
     const itemIds = dlg.querySelector<HTMLInputElement>('.fldSelectedItemIds')?.value || '';
 
     if (id === 'queue') {
-        playbackManager.queue({
+        return Promise.resolve(playbackManager.queue({
             serverId: currentServerId,
             ids: itemIds.split(',')
-        }).catch(err => {
-            console.error('[PlaylistEditor] failed to add to queue', err);
-        });
-        dlg.submitted = true;
-        dialogHelper.close(dlg);
-        return Promise.resolve();
+        })).then(() => undefined);
     }
 
     return getPlaylistsApi(api)
@@ -159,26 +200,30 @@ function addToPlaylist(dlg: DialogElement, id: string) {
             ids: itemIds.split(','),
             userId: apiClient.getCurrentUserId()
         })
-        .then(() => {
-            dlg.submitted = true;
-            dialogHelper.close(dlg);
-        });
+        .then(() => undefined);
 }
 
-function triggerChange(select: HTMLSelectElement) {
-    select.dispatchEvent(new CustomEvent('change', {}));
+function toggleNewPlaylistForm(panel: ParentNode, show: boolean) {
+    panel.querySelector('.newPlaylistInfo')?.classList.toggle('hide', !show);
+
+    const nameField = panel.querySelector('#txtNewPlaylistName');
+    if (show) {
+        nameField?.setAttribute('required', 'required');
+    } else {
+        nameField?.removeAttribute('required');
+    }
 }
 
 function populatePlaylists(editorOptions: PlaylistEditorOptions, panel: DialogElement) {
-    const select = panel.querySelector<HTMLSelectElement>('#selectPlaylistToAddTo');
+    const container = panel.querySelector<HTMLDivElement>('#playlistCheckboxList');
 
-    if (!select) {
-        return Promise.reject(new Error('Playlist <select> element is missing'));
+    if (!container) {
+        return Promise.reject(new Error('Playlist list container element is missing'));
     }
 
     loading.show();
 
-    panel.querySelector('.newPlaylistInfo')?.classList.add('hide');
+    toggleNewPlaylistForm(panel, false);
 
     const apiClient = ServerConnections.getApiClient(currentServerId);
     const api = toApi(apiClient);
@@ -222,31 +267,41 @@ function populatePlaylists(editorOptions: PlaylistEditorOptions, panel: DialogEl
             let html = '';
 
             if ((editorOptions.enableAddToPlayQueue !== false && playbackManager.isPlaying()) || SyncPlay?.Manager.isSyncPlayEnabled()) {
-                html += `<option value="queue">${globalize.translate('AddToPlayQueue')}</option>`;
+                html += `<label>
+                    <input type="checkbox" is="emby-checkbox" class="chkPlaylist" value="queue" />
+                    <span>${globalize.translate('AddToPlayQueue')}</span>
+                </label>`;
             }
 
-            html += `<option value="">${globalize.translate('OptionNew')}</option>`;
+            playlists.forEach(({ item, permissions }) => {
+                if (!permissions?.CanEdit) return;
 
-            html += playlists.map(({ item, permissions }) => {
-                if (!permissions?.CanEdit) return '';
-
-                return `<option value="${item.Id}">${escapeHtml(item.Name)}</option>`;
+                html += `<label>
+                    <input type="checkbox" is="emby-checkbox" class="chkPlaylist" value="${item.Id}" />
+                    <span>${escapeHtml(item.Name ?? '')}</span>
+                </label>`;
             });
 
-            select.innerHTML = html;
+            container.innerHTML = html;
 
+            // Pre-select the last used playlist
             let defaultValue = editorOptions.defaultValue;
             if (!defaultValue) {
                 defaultValue = userSettings.get('playlisteditor-lastplaylistid') || '';
             }
-            select.value = defaultValue === 'new' ? '' : defaultValue;
-
-            // If the value is empty set it again, in case we tried to set a lastplaylistid that is no longer valid
-            if (!select.value) {
-                select.value = '';
+            if (defaultValue && defaultValue !== 'new') {
+                container.querySelectorAll<HTMLInputElement>('.chkPlaylist').forEach(checkbox => {
+                    if (checkbox.value === defaultValue) checkbox.checked = true;
+                });
             }
 
-            triggerChange(select);
+            // Show/hide the new-playlist form when the "Create new" checkbox is toggled
+            panel.querySelector('#chkCreateNewPlaylist')?.addEventListener('change', function(this: HTMLInputElement) {
+                toggleNewPlaylistForm(panel, this.checked);
+                if (this.checked) {
+                    panel.querySelector<HTMLInputElement>('#txtNewPlaylistName')?.focus();
+                }
+            });
         });
 }
 
@@ -257,15 +312,17 @@ function getEditorHtml(items: string[], options: PlaylistEditorOptions) {
     html += '<div class="dialogContentInner dialog-content-centered">';
     html += '<form style="margin:auto;">';
 
-    html += '<div class="fldSelectPlaylist selectContainer">';
-    let autoFocus = items.length ? ' autofocus' : '';
-    html += `<select is="emby-select" id="selectPlaylistToAddTo" label="${globalize.translate('LabelPlaylist')}"${autoFocus}></select>`;
+    html += '<div class="newPlaylistOption checkboxList">';
+    html += `<label>
+        <input type="checkbox" is="emby-checkbox" id="chkCreateNewPlaylist" />
+        <span>${globalize.translate('OptionNew')}</span>
+    </label>`;
     html += '</div>';
 
     html += '<div class="newPlaylistInfo">';
 
     html += '<div class="inputContainer">';
-    autoFocus = items.length ? '' : ' autofocus';
+    const autoFocus = items.length ? '' : ' autofocus';
     html += `<input is="emby-input" type="text" id="txtNewPlaylistName" required="required" label="${globalize.translate('LabelName')}"${autoFocus} />`;
     html += '</div>';
 
@@ -283,6 +340,10 @@ function getEditorHtml(items: string[], options: PlaylistEditorOptions) {
     // newPlaylistInfo
     html += '</div>';
 
+    html += '<div class="fldSelectPlaylist">';
+    html += '<div id="playlistCheckboxList" class="checkboxList playlistCheckboxList"></div>';
+    html += '</div>';
+
     html += '<div class="formDialogFooter">';
     html += `<button is="emby-button" type="submit" class="raised btnSubmit block formDialogFooterItem button-submit">${options.id ? globalize.translate('Save') : globalize.translate('Add')}</button>`;
     html += '</div>';
@@ -297,16 +358,6 @@ function getEditorHtml(items: string[], options: PlaylistEditorOptions) {
 }
 
 function initEditor(content: DialogElement, options: PlaylistEditorOptions, items: string[]) {
-    content.querySelector('#selectPlaylistToAddTo')?.addEventListener('change', function(this: HTMLSelectElement) {
-        if (this.value) {
-            content.querySelector('.newPlaylistInfo')?.classList.add('hide');
-            content.querySelector('#txtNewPlaylistName')?.removeAttribute('required');
-        } else {
-            content.querySelector('.newPlaylistInfo')?.classList.remove('hide');
-            content.querySelector('#txtNewPlaylistName')?.setAttribute('required', 'required');
-        }
-    });
-
     content.querySelector('form')?.addEventListener('submit', onSubmit);
 
     const selectedItemsInput = content.querySelector<HTMLInputElement>('.fldSelectedItemIds');
@@ -323,6 +374,7 @@ function initEditor(content: DialogElement, options: PlaylistEditorOptions, item
             .finally(loading.hide);
     } else if (options.id) {
         content.querySelector('.fldSelectPlaylist')?.classList.add('hide');
+        content.querySelector('.newPlaylistOption')?.classList.add('hide');
         const panel = dom.parentWithClass(content, 'dialog') as DialogElement | null;
         if (!panel) {
             console.error('[PlaylistEditor] could not find dialog element');
@@ -350,14 +402,9 @@ function initEditor(content: DialogElement, options: PlaylistEditorOptions, item
                 console.error('[playlistEditor] failed to get playlist details', err);
             });
     } else {
+        // Standalone create-new-playlist mode
         content.querySelector('.fldSelectPlaylist')?.classList.add('hide');
-
-        const selectPlaylistToAddTo = content.querySelector<HTMLSelectElement>('#selectPlaylistToAddTo');
-        if (selectPlaylistToAddTo) {
-            selectPlaylistToAddTo.innerHTML = '';
-            selectPlaylistToAddTo.value = '';
-            triggerChange(selectPlaylistToAddTo);
-        }
+        content.querySelector('.newPlaylistOption')?.classList.add('hide');
     }
 }
 
