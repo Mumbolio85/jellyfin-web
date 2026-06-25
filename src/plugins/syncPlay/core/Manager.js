@@ -409,6 +409,7 @@ class Manager {
         this.lastPlaybackCommand = null;
         this.queuedCommand = null;
         this.playbackCore.syncEnabled = false;
+        this.playbackCore.skipToSyncEnabled = false;
         Events.trigger(this, 'enabled', [false]);
         this.playerWrapper.unbindFromPlayer();
 

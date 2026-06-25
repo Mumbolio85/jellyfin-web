@@ -4,6 +4,8 @@
  */
 
 import NoActivePlayer from './NoActivePlayer';
+import { playbackManager } from '../../../../components/playback/playbackmanager';
+import * as Helper from '../../core/Helper';
 import Events from '../../../../utils/events.ts';
 
 /**
@@ -159,6 +161,63 @@ class HtmlVideoPlayer extends NoActivePlayer {
      */
     getPlaybackRate() {
         return this.player.getPlaybackRate();
+    }
+
+    /**
+     * Checks if the current media is being transcoded by the server. Overrides parent method.
+     * @returns {boolean} _true_ if the stream is transcoding, _false_ otherwise or when unknown.
+     */
+    isTranscoding() {
+        if (!this.player) {
+            return false;
+        }
+
+        try {
+            return playbackManager.playMethod(this.player) === 'Transcode';
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * Gets the buffered time ranges of the player. Overrides parent method.
+     *
+     * playbackManager.getBufferedRanges() reports ranges in absolute media ticks (the transcoding
+     * offset is baked in), but currentTime() — and therefore every position SyncPlay works with — is
+     * segment-relative (no offset). When transcoding starts at a non-zero position (a resume, or after
+     * a SkipToSync seek), that mismatch would push the playhead outside every reported range, making
+     * the forward-buffer calculation read 0 and silently disable buffer-aware correction. Re-base the
+     * ranges into the currentTime() coordinate so the buffer math is consistent regardless of offset.
+     * @returns {Array} The buffered ranges as `{ start, end }` objects in ticks. Empty when unknown.
+     */
+    getBufferedRanges() {
+        if (!this.player) {
+            return [];
+        }
+
+        const ranges = playbackManager.getBufferedRanges(this.player);
+
+        // Derive the transcoding offset using only public APIs: getCurrentTicks() returns the
+        // absolute position (segment-relative time + offset), currentTime() the segment-relative one.
+        let offsetTicks = 0;
+        try {
+            const currentTimeMillis = this.player.currentTime();
+            if (typeof currentTimeMillis === 'number') {
+                offsetTicks = playbackManager.getCurrentTicks(this.player)
+                    - currentTimeMillis * Helper.TicksPerMillisecond;
+            }
+        } catch {
+            offsetTicks = 0;
+        }
+
+        if (!offsetTicks) {
+            return ranges;
+        }
+
+        return ranges.map((range) => ({
+            start: range.start - offsetTicks,
+            end: range.end - offsetTicks
+        }));
     }
 }
 

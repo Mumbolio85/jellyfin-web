@@ -18,8 +18,14 @@
                 </label>
                 <div class="fieldDescription checkboxFieldDescription">${LabelSyncPlaySettingsSyncCorrectionHelp}</div>
             </div>
+            <div class="inputContainer inputContainer-withDescription">
+                <input type="number" is="emby-input" id="txtSyncTolerance" pattern="[0-9]*"
+                    label="${LabelSyncPlaySettingsSyncTolerance}" min="0"/>
+                <div class="fieldDescription">${LabelSyncPlaySettingsSyncToleranceHelp}</div>
+            </div>
 
-            <!-- SpeedToSync Settings -->
+            <!-- Speed Correction Settings -->
+            <h2 class="sectionTitle">${HeaderSyncPlaySpeedCorrection}</h2>
             <div class="checkboxContainer checkboxContainer-withDescription">
                 <label>
                     <input type="checkbox" is="emby-checkbox" id="chkSpeedToSync" />
@@ -28,28 +34,44 @@
                 <div class="fieldDescription checkboxFieldDescription">${LabelSyncPlaySettingsSpeedToSyncHelp}</div>
             </div>
             <div class="inputContainer inputContainer-withDescription">
-                <input type="number" is="emby-input" id="txtMinDelaySpeedToSync" pattern="[0-9]*"
-                    label="${LabelSyncPlaySettingsMinDelaySpeedToSync}" />
-                <div class="fieldDescription">${LabelSyncPlaySettingsMinDelaySpeedToSyncHelp}</div>
+                <input type="number" is="emby-input" id="txtSyncCorrectionStrength" step="0.01"
+                    label="${LabelSyncPlaySettingsCorrectionStrength}" min="0"/>
+                <div class="fieldDescription">${LabelSyncPlaySettingsCorrectionStrengthHelp}</div>
             </div>
             <div class="inputContainer inputContainer-withDescription">
-                <input type="number" is="emby-input" id="txtMaxDelaySpeedToSync" pattern="[0-9]*"
-                    label="${LabelSyncPlaySettingsMaxDelaySpeedToSync}" min="0"/>
-                <div class="fieldDescription">${LabelSyncPlaySettingsMaxDelaySpeedToSyncHelp}</div>
+                <input type="number" is="emby-input" id="txtMaxPlaybackSpeedDirectPlay" pattern="[0-9]*"
+                    label="${LabelSyncPlaySettingsMaxSpeedDirectPlay}" min="0"/>
+                <div class="fieldDescription">${LabelSyncPlaySettingsMaxSpeedDirectPlayHelp}</div>
             </div>
             <div class="inputContainer inputContainer-withDescription">
-                <input type="number" is="emby-input" id="txtSpeedToSyncDuration" pattern="[0-9]*"
-                    label="${LabelSyncPlaySettingsSpeedToSyncDuration}" min="0"/>
-                <div class="fieldDescription">${LabelSyncPlaySettingsSpeedToSyncDurationHelp}</div>
+                <input type="number" is="emby-input" id="txtMaxPlaybackSpeedTranscode" pattern="[0-9]*"
+                    label="${LabelSyncPlaySettingsMaxSpeedTranscode}" min="0"/>
+                <div class="fieldDescription">${LabelSyncPlaySettingsMaxSpeedTranscodeHelp}</div>
+            </div>
+            <div class="inputContainer inputContainer-withDescription">
+                <input type="number" is="emby-input" id="txtMinBufferForSpeedUp" pattern="[0-9]*"
+                    label="${LabelSyncPlaySettingsMinBufferForSpeedUp}" min="0"/>
+                <div class="fieldDescription">${LabelSyncPlaySettingsMinBufferForSpeedUpHelp}</div>
             </div>
 
-            <!-- SkipToSync Settings -->
+            <!-- Seek Correction Settings -->
+            <h2 class="sectionTitle">${HeaderSyncPlaySeekCorrection}</h2>
             <div class="checkboxContainer checkboxContainer-withDescription">
                 <label>
                     <input type="checkbox" is="emby-checkbox" id="chkSkipToSync" />
                     <span>${LabelSyncPlaySettingsSkipToSync}</span>
                 </label>
                 <div class="fieldDescription checkboxFieldDescription">${LabelSyncPlaySettingsSkipToSyncHelp}</div>
+            </div>
+            <div class="inputContainer inputContainer-withDescription">
+                <input type="number" is="emby-input" id="txtSeekDriftThreshold" pattern="[0-9]*"
+                    label="${LabelSyncPlaySettingsSeekThreshold}" min="0"/>
+                <div class="fieldDescription">${LabelSyncPlaySettingsSeekThresholdHelp}</div>
+            </div>
+            <div class="inputContainer inputContainer-withDescription">
+                <input type="number" is="emby-input" id="txtSeekDriftSustain" pattern="[0-9]*"
+                    label="${LabelSyncPlaySettingsSeekSustain}" min="0"/>
+                <div class="fieldDescription">${LabelSyncPlaySettingsSeekSustainHelp}</div>
             </div>
             <div class="inputContainer inputContainer-withDescription">
                 <input type="number" is="emby-input" id="txtMinDelaySkipToSync" pattern="[0-9]*"

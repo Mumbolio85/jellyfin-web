@@ -8,6 +8,26 @@ import { toBoolean, toFloat } from '../../../utils/string.ts';
 import * as Helper from './Helper';
 import { getSetting } from './Settings';
 
+// The user-tunable knobs below (rate-controller gain, maximum speed adjustments, required buffer
+// headroom and seek thresholds) live in the SyncPlay settings and are loaded in loadPreferences().
+// The constants here are internal mechanics not worth exposing in the UI.
+
+// Minimum milliseconds between sync-correction checks. Throttles the controller so it reacts
+// to trends rather than to per-frame timeupdate noise.
+const SYNC_CHECK_INTERVAL = 1500;
+
+// --- Component 1: calibrated drift estimator ---
+// Number of recent diff samples used for the rolling median that rejects currentTime granularity noise.
+const DRIFT_MEDIAN_WINDOW = 5;
+
+// --- Component 5: readiness-gated startup ---
+// Consecutive throttled samples with monotonic, advancing playback required before correction starts.
+const READINESS_STABLE_SAMPLES = 3;
+
+// --- Component 4: transcode-aware, last-resort seek ---
+// When seeking a transcoded stream, target this many seconds ahead to absorb the re-transcode delay.
+const SEEK_TRANSCODE_LOOKAHEAD_SECONDS = 2;
+
 /**
  * Class that manages the playback of SyncPlay.
  */
@@ -17,15 +37,23 @@ class PlaybackCore {
         this.timeSyncCore = null;
 
         this.syncEnabled = false;
+        this.skipToSyncEnabled = false;
         this.playbackDiffMillis = 0; // Used for stats and remote time sync.
         this.syncAttempts = 0;
         this.lastSyncTime = new Date();
 
         this.playerIsBuffering = false;
 
+        // Drift estimator and controller state (see resetSyncState).
+        this.diffSamples = []; // Rolling window of raw diff samples (ms) for median smoothing.
+        this.baselineOffsetMillis = null; // Calibrated constant offset O; null until correction starts.
+        this.stableSampleCount = 0; // Consecutive monotonic samples observed while gating readiness.
+        this.lastReadinessPositionTicks = null; // Previous position used for the monotonic readiness check.
+        this.largeDriftSince = null; // Timestamp when drift first exceeded the seek threshold.
+        this.currentPlaybackRate = 1.0; // Last applied playback rate, to avoid redundant player calls.
+
         this.lastCommand = null; // Last scheduled playback command, might not be the latest one.
         this.scheduledCommandTimeout = null;
-        this.syncTimeout = null;
 
         this.loadPreferences();
     }
@@ -47,26 +75,44 @@ class PlaybackCore {
      * Loads preferences from saved settings.
      */
     loadPreferences() {
-        // Minimum required delay for SpeedToSync to kick in, in milliseconds.
-        this.minDelaySpeedToSync = toFloat(getSetting('minDelaySpeedToSync'), 60.0);
+        // Drift (in milliseconds) tolerated before any correction kicks in (the controller deadband).
+        this.syncTolerance = toFloat(getSetting('minDelaySpeedToSync'), 60.0);
 
-        // Maximum delay after which SkipToSync is used instead of SpeedToSync, in milliseconds.
-        this.maxDelaySpeedToSync = toFloat(getSetting('maxDelaySpeedToSync'), 3000.0);
-
-        // Time during which the playback is sped up, in milliseconds.
-        this.speedToSyncDuration = toFloat(getSetting('speedToSyncDuration'), 1000.0);
-
-        // Minimum required delay for SkipToSync to kick in, in milliseconds.
+        // Position difference (in milliseconds) at unpause above which playback seeks straight to
+        // the correct position instead of letting the controller converge.
         this.minDelaySkipToSync = toFloat(getSetting('minDelaySkipToSync'), 400.0);
 
-        // Whether SpeedToSync should be used.
+        // Whether the proportional speed (rate-trim) correction should be used.
         this.useSpeedToSync = toBoolean(getSetting('useSpeedToSync'), true);
 
-        // Whether SkipToSync should be used.
+        // Whether the last-resort seek correction should be used.
         this.useSkipToSync = toBoolean(getSetting('useSkipToSync'), true);
 
         // Whether sync correction during playback is active.
-        this.enableSyncCorrection = toBoolean(getSetting('enableSyncCorrection'), false);
+        this.enableSyncCorrection = toBoolean(getSetting('enableSyncCorrection'), true);
+
+        // --- Proportional rate controller (Components 2 & 3) ---
+        // Playback-rate change applied per second of drift: rate = 1 + strength * driftSeconds.
+        this.syncCorrectionStrength = toFloat(getSetting('syncCorrectionStrength'), 0.05);
+
+        // Maximum playback speed adjustment (percent) during direct play, where the buffer is not a
+        // concern, so we may converge faster.
+        this.maxPlaybackSpeedDirectPlay = toFloat(getSetting('maxPlaybackSpeedDirectPlay'), 10.0);
+
+        // Maximum playback speed adjustment (percent) while transcoding. Kept gentle so we never
+        // drain a near-realtime transcode buffer.
+        this.maxPlaybackSpeedTranscode = toFloat(getSetting('maxPlaybackSpeedTranscode'), 5.0);
+
+        // Forward buffer (in seconds) a transcoding stream must hold before correction may start and
+        // before it is allowed to speed up. Prevents self-induced buffering.
+        this.minBufferForSpeedUp = toFloat(getSetting('minBufferForSpeedUp'), 10.0);
+
+        // --- Last-resort seek (Component 4) ---
+        // Drift (in milliseconds) above which a hard seek is considered.
+        this.seekDriftThreshold = toFloat(getSetting('seekDriftThreshold'), 10000.0);
+
+        // Duration (in milliseconds) the drift must stay above the threshold before a seek fires.
+        this.seekDriftSustain = toFloat(getSetting('seekDriftSustain'), 5000.0);
     }
 
     /**
@@ -274,7 +320,6 @@ class PlaybackCore {
      */
     async scheduleUnpause(playAtTime, positionTicks) {
         this.clearScheduledCommand();
-        const enableSyncTimeout = this.maxDelaySpeedToSync / 2.0;
         const currentTime = new Date();
         const playAtTimeLocal = this.timeSyncCore.remoteDateToLocal(playAtTime);
 
@@ -283,6 +328,9 @@ class PlaybackCore {
             await playerWrapper.currentTimeAsync() :
             playerWrapper.currentTime()) * Helper.TicksPerMillisecond;
 
+        // Correction is no longer enabled on a fixed timer. It is gated on measured readiness
+        // (playback advancing steadily and, when transcoding, a healthy buffer) inside
+        // syncPlaybackTime, which also captures the calibrated baseline offset at that moment.
         if (playAtTimeLocal > currentTime) {
             const playTimeout = playAtTimeLocal - currentTime;
 
@@ -294,10 +342,6 @@ class PlaybackCore {
             this.scheduledCommandTimeout = setTimeout(() => {
                 this.localUnpause();
                 Events.trigger(this.manager, 'notify-osd', ['unpause']);
-
-                this.syncTimeout = setTimeout(() => {
-                    this.syncEnabled = true;
-                }, enableSyncTimeout);
             }, playTimeout);
 
             console.debug('Scheduled unpause in', playTimeout / 1000.0, 'seconds.');
@@ -311,10 +355,6 @@ class PlaybackCore {
             setTimeout(() => {
                 Events.trigger(this.manager, 'notify-osd', ['unpause']);
             }, 100);
-
-            this.syncTimeout = setTimeout(() => {
-                this.syncEnabled = true;
-            }, enableSyncTimeout);
 
             console.debug(`SyncPlay scheduleUnpause: unpause now from ${serverPositionTicks} (was at ${currentPositionTicks}).`);
         }
@@ -414,15 +454,80 @@ class PlaybackCore {
      */
     clearScheduledCommand() {
         clearTimeout(this.scheduledCommandTimeout);
-        clearTimeout(this.syncTimeout);
 
         this.syncEnabled = false;
+        this.skipToSyncEnabled = false;
+        this.resetSyncState();
+
         const playerWrapper = this.manager.getPlayerWrapper();
         if (playerWrapper.hasPlaybackRate()) {
             playerWrapper.setPlaybackRate(1.0);
         }
 
         this.manager.clearSyncIcon();
+    }
+
+    /**
+     * Resets the drift estimator, readiness gating and rate-controller state so that the next
+     * unpause re-calibrates from scratch.
+     */
+    resetSyncState() {
+        this.diffSamples = [];
+        this.baselineOffsetMillis = null;
+        this.stableSampleCount = 0;
+        this.lastReadinessPositionTicks = null;
+        this.largeDriftSince = null;
+        this.currentPlaybackRate = 1.0;
+    }
+
+    /**
+     * Pushes a raw diff sample into the rolling window and returns the median, rejecting the
+     * granularity noise of the player's reported position (Component 1).
+     * @param {number} rawDiffMillis The latest raw diff, in milliseconds.
+     * @returns {number} The smoothed (median) diff, in milliseconds.
+     */
+    getSmoothedDiff(rawDiffMillis) {
+        this.diffSamples.push(rawDiffMillis);
+        if (this.diffSamples.length > DRIFT_MEDIAN_WINDOW) {
+            this.diffSamples.shift();
+        }
+
+        const sorted = [...this.diffSamples].sort((a, b) => a - b);
+        return sorted[Math.floor(sorted.length / 2)];
+    }
+
+    /**
+     * Computes the forward buffer headroom from the given position (Component 3).
+     * @param {number} positionTicks The current position, in ticks.
+     * @returns {number} The forward headroom in seconds, or 0 when unknown.
+     */
+    getForwardBufferSeconds(positionTicks) {
+        const ranges = this.manager.getPlayerWrapper().getBufferedRanges();
+        for (const range of ranges) {
+            if (positionTicks >= range.start && positionTicks <= range.end) {
+                return (range.end - positionTicks) / Helper.TicksPerMillisecond / 1000.0;
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+     * Applies a playback rate to the player only when it differs from the last applied value.
+     * @param {number} rate The desired playback rate.
+     */
+    applyPlaybackRate(rate) {
+        const playerWrapper = this.manager.getPlayerWrapper();
+        if (!playerWrapper.hasPlaybackRate()) {
+            return;
+        }
+
+        if (Math.abs(rate - this.currentPlaybackRate) < 0.001) {
+            return;
+        }
+
+        this.currentPlaybackRate = rate;
+        playerWrapper.setPlaybackRate(rate);
     }
 
     /**
@@ -495,21 +600,21 @@ class PlaybackCore {
     /**
      * Attempts to sync playback time with estimated server time (or selected device for time sync).
      *
-     * When sync is enabled, the following will be checked:
-     *  - check if local playback time is close enough to the server playback time;
-     *  - playback diff (distance from estimated server playback time) is aligned with selected device for time sync.
-     * If playback diff exceeds some set thresholds, then a playback time sync will be attempted.
-     * Two strategies of syncing are available:
-     * - SpeedToSync: speeds up the media for some time to catch up (default is one second)
-     * - SkipToSync: seeks the media to the estimated correct time
-     * SpeedToSync aims to reduce the delay as much as possible, whereas SkipToSync is less pretentious.
+     * The corrector is designed to behave well when the local stream is being transcoded, where the
+     * reported position carries a constant offset (e.g. ffmpeg's `-noaccurate_seek`) that must be
+     * tolerated rather than chased. It works in stages:
+     *  - Component 1: a rolling median rejects position noise and a calibrated baseline offset is
+     *    captured so only genuine *drift* (the rate of change) is acted upon, never the constant offset.
+     *  - Component 5: correction is gated on measured readiness (playback advancing + healthy buffer),
+     *    not on a fixed timer.
+     *  - Components 2 & 3: a continuous, clamped, buffer-aware proportional controller trims the
+     *    playback rate to converge — and refuses to speed up a transcoding stream without buffer
+     *    headroom, so it never drains the buffer into a stall.
+     *  - Component 4: a hard seek is a last resort, used only for large drift sustained over time, and
+     *    targets slightly ahead when transcoding to absorb the re-transcode delay.
      * @param {Object} timeUpdateData The time update data that contains the current time as date and the current position in milliseconds.
      */
     syncPlaybackTime(timeUpdateData) {
-        // See comments in constants section for more info.
-        const syncMethodThreshold = this.maxDelaySpeedToSync;
-        let speedToSyncTime = this.speedToSyncDuration;
-
         // Ignore sync when no player is active.
         if (!this.manager.isPlaybackActive()) {
             console.debug('SyncPlay syncPlaybackTime: no active player!');
@@ -535,72 +640,119 @@ class PlaybackCore {
         // Estimate PositionTicks on server.
         const serverPositionTicks = this.estimateCurrentTicks(lastCommand.PositionTicks, lastCommand.When, currentTime);
 
-        // Measure delay that needs to be recovered.
-        // Diff might be caused by the player internally starting the playback.
-        const diffMillis = (serverPositionTicks - currentPositionTicks) / Helper.TicksPerMillisecond;
+        // Raw distance from estimated server position. This mixes a constant transcoding offset
+        // (which must NOT be corrected) with real drift and noise — they are separated below.
+        const rawDiffMillis = (serverPositionTicks - currentPositionTicks) / Helper.TicksPerMillisecond;
 
-        // Notify update for playback sync.
-        this.playbackDiffMillis = diffMillis;
+        // Notify update for playback sync. Stats and remote time sync use the raw diff.
+        this.playbackDiffMillis = rawDiffMillis;
         Events.trigger(this.manager, 'playback-diff', [this.playbackDiffMillis]);
 
         // Avoid overloading the browser.
         const elapsed = currentTime - this.lastSyncTime;
-        if (elapsed < syncMethodThreshold / 2) return;
+        if (elapsed < SYNC_CHECK_INTERVAL) return;
 
         this.lastSyncTime = currentTime;
+
+        if (!this.enableSyncCorrection) return;
+
         const playerWrapper = this.manager.getPlayerWrapper();
+        const isTranscoding = playerWrapper.isTranscoding();
 
-        if (this.syncEnabled && this.enableSyncCorrection) {
-            const absDiffMillis = Math.abs(diffMillis);
-            // TODO: SpeedToSync sounds bad on songs.
-            // TODO: SpeedToSync is failing on Safari (Mojave); even if playbackRate is supported, some delay seems to exist.
-            // TODO: both SpeedToSync and SpeedToSync seem to have a hard time keeping up on Android Chrome as well.
-            if (playerWrapper.hasPlaybackRate() && this.useSpeedToSync && absDiffMillis >= this.minDelaySpeedToSync && absDiffMillis < this.maxDelaySpeedToSync) {
-                // Fix negative speed when client is ahead of time more than speedToSyncTime.
-                const MinSpeed = 0.2;
-                if (diffMillis <= -speedToSyncTime * MinSpeed) {
-                    speedToSyncTime = Math.abs(diffMillis) / (1.0 - MinSpeed);
-                }
+        // Component 1: reject the player's position granularity noise with a short rolling median.
+        const smoothedDiffMillis = this.getSmoothedDiff(rawDiffMillis);
 
-                // SpeedToSync strategy.
-                const speed = 1 + diffMillis / speedToSyncTime;
+        // Component 5: readiness-gated startup. Wait until playback is advancing steadily and, when
+        // transcoding, the forward buffer is healthy. The smoothed diff at that point becomes the
+        // tolerated baseline offset O, so the constant transcoding offset is never "corrected".
+        if (!this.syncEnabled) {
+            const advancing = this.lastReadinessPositionTicks !== null
+                && currentPositionTicks > this.lastReadinessPositionTicks;
+            this.stableSampleCount = advancing ? this.stableSampleCount + 1 : 0;
+            this.lastReadinessPositionTicks = currentPositionTicks;
 
-                if (speed <= 0) {
-                    console.error('SyncPlay error: speed should not be negative!', speed, diffMillis, speedToSyncTime);
-                }
+            const bufferHealthy = !isTranscoding
+                || this.getForwardBufferSeconds(currentPositionTicks) >= this.minBufferForSpeedUp;
 
-                playerWrapper.setPlaybackRate(speed);
-                this.syncEnabled = false;
-                this.syncAttempts++;
-                this.manager.showSyncIcon(`SpeedToSync (x${speed.toFixed(2)})`);
+            if (this.stableSampleCount >= READINESS_STABLE_SAMPLES && bufferHealthy) {
+                this.baselineOffsetMillis = smoothedDiffMillis;
+                this.syncEnabled = true;
+                this.skipToSyncEnabled = true;
+                console.debug('SyncPlay ready; calibrated baseline offset (ms):', this.baselineOffsetMillis);
+            }
+            return;
+        }
 
-                this.syncTimeout = setTimeout(() => {
-                    playerWrapper.setPlaybackRate(1.0);
-                    this.syncEnabled = true;
-                    this.manager.clearSyncIcon();
-                }, speedToSyncTime);
+        // Component 1: act on drift (rate of change), not on the constant offset.
+        const driftMillis = smoothedDiffMillis - this.baselineOffsetMillis;
+        const absDriftMillis = Math.abs(driftMillis);
 
-                console.log('SyncPlay SpeedToSync', speed);
-            } else if (this.useSkipToSync && absDiffMillis >= this.minDelaySkipToSync) {
-                // SkipToSync strategy.
-                this.localSeek(serverPositionTicks);
-                this.syncEnabled = false;
+        // Deadband: within tolerance, hold normal speed and consider playback synced.
+        if (absDriftMillis < this.syncTolerance) {
+            this.largeDriftSince = null;
+            this.applyPlaybackRate(1.0);
+            this.manager.clearSyncIcon();
+            if (this.syncAttempts > 0) {
+                console.debug('Playback has been synced after', this.syncAttempts, 'attempts.');
+                this.syncAttempts = 0;
+            }
+            return;
+        }
+
+        // Component 4: a hard seek is the last resort — only for large drift that persists over
+        // several samples, since each seek spawns a new transcode job and buffering.
+        if (absDriftMillis >= this.seekDriftThreshold) {
+            if (this.largeDriftSince === null) {
+                this.largeDriftSince = currentTime;
+            }
+            const sustainedMillis = currentTime - this.largeDriftSince;
+            if (this.useSkipToSync && this.skipToSyncEnabled && sustainedMillis >= this.seekDriftSustain) {
+                // Target slightly ahead when transcoding to absorb the re-transcode delay.
+                const lookaheadTicks = isTranscoding ?
+                    SEEK_TRANSCODE_LOOKAHEAD_SECONDS * 1000 * Helper.TicksPerMillisecond :
+                    0;
+                const seekTargetTicks = serverPositionTicks + lookaheadTicks;
+
+                this.applyPlaybackRate(1.0);
+                this.localSeek(seekTargetTicks);
                 this.syncAttempts++;
                 this.manager.showSyncIcon(`SkipToSync (${this.syncAttempts})`);
 
-                this.syncTimeout = setTimeout(() => {
-                    this.syncEnabled = true;
-                    this.manager.clearSyncIcon();
-                }, syncMethodThreshold / 2);
+                // Re-gate: re-calibrate readiness and baseline once the stream settles after the seek.
+                this.syncEnabled = false;
+                this.skipToSyncEnabled = false;
+                this.resetSyncState();
 
-                console.log('SyncPlay SkipToSync', serverPositionTicks);
-            } else {
-                // Playback is synced.
-                if (this.syncAttempts > 0) {
-                    console.debug('Playback has been synced after', this.syncAttempts, 'attempts.');
-                }
-                this.syncAttempts = 0;
+                console.log('SyncPlay SkipToSync', seekTargetTicks);
+                return;
             }
+            // Not sustained yet — keep trimming with the rate controller while we wait it out.
+        } else {
+            this.largeDriftSince = null;
+        }
+
+        // Components 2 & 3: continuous, buffer-aware proportional rate trim.
+        if (playerWrapper.hasPlaybackRate() && this.useSpeedToSync) {
+            // Widen the clamp for direct play (no buffer concern); stay gentle while transcoding.
+            // The maximum speed adjustments are stored as percentages, so convert to a 0-1 fraction.
+            const trim = (isTranscoding ? this.maxPlaybackSpeedTranscode : this.maxPlaybackSpeedDirectPlay) / 100.0;
+            let rate = 1 + this.syncCorrectionStrength * (driftMillis / 1000.0);
+            rate = Math.min(1 + trim, Math.max(1 - trim, rate));
+
+            // Component 3: never speed up a transcoding stream without forward buffer headroom.
+            // Slowing down (rate < 1) is always safe. A starved client flags itself as the
+            // bottleneck instead of draining its buffer into a stall.
+            if (rate > 1 && isTranscoding
+                && this.getForwardBufferSeconds(currentPositionTicks) < this.minBufferForSpeedUp) {
+                rate = 1.0;
+                this.manager.showSyncIcon('Buffering (bottleneck)');
+            } else {
+                this.manager.showSyncIcon(`SpeedToSync (x${rate.toFixed(3)})`);
+            }
+
+            this.applyPlaybackRate(rate);
+            this.syncAttempts++;
+            console.log('SyncPlay rate trim', rate.toFixed(3), 'drift(ms)', driftMillis.toFixed(0));
         }
     }
 }

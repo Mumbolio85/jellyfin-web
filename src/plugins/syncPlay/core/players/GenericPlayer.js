@@ -172,6 +172,23 @@ class GenericPlayer {
     }
 
     /**
+     * Checks if the current media is being transcoded by the server.
+     * @returns {boolean} _true_ if the stream is transcoding, _false_ otherwise or when unknown.
+     */
+    isTranscoding() {
+        return false;
+    }
+
+    /**
+     * Gets the buffered time ranges of the player, expressed in the same coordinate as currentTime()
+     * (segment-relative ticks, i.e. without any transcoding offset).
+     * @returns {Array} The buffered ranges as `{ start, end }` objects in ticks. Empty when unknown.
+     */
+    getBufferedRanges() {
+        return [];
+    }
+
+    /**
      * Checks if player is remotely self-managed.
      * @returns {boolean} _true_ if the player is remotely self-managed, _false_ otherwise.
      */

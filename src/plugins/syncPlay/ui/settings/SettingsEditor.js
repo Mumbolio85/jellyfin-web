@@ -97,14 +97,20 @@ class SettingsEditor {
     async initEditor() {
         const { context } = this;
 
+        const playbackCore = this.SyncPlay?.Manager.playbackCore;
+
         context.querySelector('#txtExtraTimeOffset').value = this.SyncPlay?.Manager.timeSyncCore.extraTimeOffset;
-        context.querySelector('#chkSyncCorrection').checked = this.SyncPlay?.Manager.playbackCore.enableSyncCorrection;
-        context.querySelector('#txtMinDelaySpeedToSync').value = this.SyncPlay?.Manager.playbackCore.minDelaySpeedToSync;
-        context.querySelector('#txtMaxDelaySpeedToSync').value = this.SyncPlay?.Manager.playbackCore.maxDelaySpeedToSync;
-        context.querySelector('#txtSpeedToSyncDuration').value = this.SyncPlay?.Manager.playbackCore.speedToSyncDuration;
-        context.querySelector('#txtMinDelaySkipToSync').value = this.SyncPlay?.Manager.playbackCore.minDelaySkipToSync;
-        context.querySelector('#chkSpeedToSync').checked = this.SyncPlay?.Manager.playbackCore.useSpeedToSync;
-        context.querySelector('#chkSkipToSync').checked = this.SyncPlay?.Manager.playbackCore.useSkipToSync;
+        context.querySelector('#chkSyncCorrection').checked = playbackCore?.enableSyncCorrection;
+        context.querySelector('#txtSyncTolerance').value = playbackCore?.syncTolerance;
+        context.querySelector('#chkSpeedToSync').checked = playbackCore?.useSpeedToSync;
+        context.querySelector('#txtSyncCorrectionStrength').value = playbackCore?.syncCorrectionStrength;
+        context.querySelector('#txtMaxPlaybackSpeedDirectPlay').value = playbackCore?.maxPlaybackSpeedDirectPlay;
+        context.querySelector('#txtMaxPlaybackSpeedTranscode').value = playbackCore?.maxPlaybackSpeedTranscode;
+        context.querySelector('#txtMinBufferForSpeedUp').value = playbackCore?.minBufferForSpeedUp;
+        context.querySelector('#chkSkipToSync').checked = playbackCore?.useSkipToSync;
+        context.querySelector('#txtSeekDriftThreshold').value = playbackCore?.seekDriftThreshold;
+        context.querySelector('#txtSeekDriftSustain').value = playbackCore?.seekDriftSustain;
+        context.querySelector('#txtMinDelaySkipToSync').value = playbackCore?.minDelaySkipToSync;
     }
 
     onSubmit() {
@@ -125,21 +131,30 @@ class SettingsEditor {
 
         const extraTimeOffset = context.querySelector('#txtExtraTimeOffset').value;
         const syncCorrection = context.querySelector('#chkSyncCorrection').checked;
-        const minDelaySpeedToSync = context.querySelector('#txtMinDelaySpeedToSync').value;
-        const maxDelaySpeedToSync = context.querySelector('#txtMaxDelaySpeedToSync').value;
-        const speedToSyncDuration = context.querySelector('#txtSpeedToSyncDuration').value;
-        const minDelaySkipToSync = context.querySelector('#txtMinDelaySkipToSync').value;
+        const syncTolerance = context.querySelector('#txtSyncTolerance').value;
         const useSpeedToSync = context.querySelector('#chkSpeedToSync').checked;
+        const syncCorrectionStrength = context.querySelector('#txtSyncCorrectionStrength').value;
+        const maxPlaybackSpeedDirectPlay = context.querySelector('#txtMaxPlaybackSpeedDirectPlay').value;
+        const maxPlaybackSpeedTranscode = context.querySelector('#txtMaxPlaybackSpeedTranscode').value;
+        const minBufferForSpeedUp = context.querySelector('#txtMinBufferForSpeedUp').value;
         const useSkipToSync = context.querySelector('#chkSkipToSync').checked;
+        const seekDriftThreshold = context.querySelector('#txtSeekDriftThreshold').value;
+        const seekDriftSustain = context.querySelector('#txtSeekDriftSustain').value;
+        const minDelaySkipToSync = context.querySelector('#txtMinDelaySkipToSync').value;
 
         setSetting('extraTimeOffset', extraTimeOffset);
         setSetting('enableSyncCorrection', syncCorrection);
-        setSetting('minDelaySpeedToSync', minDelaySpeedToSync);
-        setSetting('maxDelaySpeedToSync', maxDelaySpeedToSync);
-        setSetting('speedToSyncDuration', speedToSyncDuration);
-        setSetting('minDelaySkipToSync', minDelaySkipToSync);
+        // Stored under the legacy key to preserve any previously saved value (now the drift deadband).
+        setSetting('minDelaySpeedToSync', syncTolerance);
         setSetting('useSpeedToSync', useSpeedToSync);
+        setSetting('syncCorrectionStrength', syncCorrectionStrength);
+        setSetting('maxPlaybackSpeedDirectPlay', maxPlaybackSpeedDirectPlay);
+        setSetting('maxPlaybackSpeedTranscode', maxPlaybackSpeedTranscode);
+        setSetting('minBufferForSpeedUp', minBufferForSpeedUp);
         setSetting('useSkipToSync', useSkipToSync);
+        setSetting('seekDriftThreshold', seekDriftThreshold);
+        setSetting('seekDriftSustain', seekDriftSustain);
+        setSetting('minDelaySkipToSync', minDelaySkipToSync);
 
         Events.trigger(this.SyncPlay?.Manager, 'settings-update');
     }
