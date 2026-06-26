@@ -489,7 +489,17 @@ class HtmlAudioPlayer {
     unpause() {
         const mediaElement = this._mediaElement;
         if (mediaElement) {
-            mediaElement.play();
+            const promise = mediaElement.play();
+            // play() returns a promise that rejects with AbortError when a pause() arrives before it
+            // resolves. This is common (and benign) under SyncPlay's rapid group pause/unpause, so
+            // swallow it instead of letting it surface as an uncaught runtime error. NotAllowedError
+            // (autoplay policy) is handled the same way as in playWithPromise().
+            promise?.catch?.((e) => {
+                const errorName = (e.name || '').toLowerCase();
+                if (errorName !== 'aborterror' && errorName !== 'notallowederror') {
+                    console.error('error calling mediaElement.play:', e);
+                }
+            });
         }
     }
 
