@@ -9,7 +9,7 @@ import Add from '@mui/icons-material/Add';
 import { useVirtualFolders } from 'apps/dashboard/features/libraries/api/useVirtualFolders';
 import Loading from 'components/loading/LoadingComponent';
 import Box from '@mui/material/Box';
-import Grid from '@mui/material/Grid';
+import Grid2 from '@mui/material/Grid2';
 import LibraryCard from 'apps/dashboard/features/libraries/components/LibraryCard';
 import MediaLibraryCreator from 'components/mediaLibraryCreator/mediaLibraryCreator';
 import getCollectionTypeOptions from 'apps/dashboard/features/libraries/utils/collectionTypeOptions';
@@ -74,20 +74,18 @@ export const Component = () => {
                 </Button>
 
                 <Box>
-                    <Grid container spacing={2}>
+                    <Grid2 container spacing={2}>
                         {virtualFolders?.map(virtualFolder => (
-                            <Grid
+                            <Grid2
                                 key={virtualFolder?.ItemId}
-                                item
-                                xs={12}
-                                sm={4}
+                                size={{ xs: 12, sm: 4 }}
                             >
                                 <LibraryCard
                                     virtualFolder={virtualFolder}
                                 />
-                            </Grid>
+                            </Grid2>
                         ))}
-                    </Grid>
+                    </Grid2>
                 </Box>
             </Stack>
         </WizardPage>
