@@ -3,7 +3,6 @@ import type { ItemSortBy } from '@jellyfin/sdk/lib/generated-client/models/item-
 import type { SortOrder } from '@jellyfin/sdk/lib/generated-client/models/sort-order';
 
 import { CardOptions } from './cardOptions';
-import { SectionsView } from './libraryTabContent';
 
 export interface ParametersOptions {
     sortBy?: ItemSortBy[];
@@ -53,7 +52,12 @@ export enum SectionType {
     ActiveRecordings = 'ActiveRecordings',
     ContinueReading = 'ContinueReading',
     LatestBooks = 'LatestBooks',
-    UpcomingRecordings = 'UpcomingRecordings'
+    UpcomingRecordings = 'UpcomingRecordings',
+    LatestMusicVideos = 'latestmusicvideos',
+    RecentlyPlayedMusicVideos = 'recentlyplayedmusicvideos',
+    FrequentlyPlayedMusicVideos = 'frequentlyplayedmusicvideos',
+    ContinueWatchingMixed = 'continuewatchingmixed',
+    LatestMixed = 'latestmixed'
 }
 
 export interface Section {
@@ -64,57 +68,3 @@ export interface Section {
     parametersOptions?: ParametersOptions;
     cardOptions: CardOptions;
 }
-
-export const BookSuggestionsSectionsView: SectionsView = {
-    suggestionSections: [
-        SectionType.LatestBooks,
-        SectionType.ContinueReading
-    ]
-};
-
-export const MovieSuggestionsSectionsView: SectionsView = {
-    suggestionSections: [
-        SectionType.ContinueWatchingMovies,
-        SectionType.LatestMovies
-    ],
-    isMovieRecommendations: true
-};
-
-export const TvShowSuggestionsSectionsView: SectionsView = {
-    suggestionSections: [
-        SectionType.ContinueWatchingEpisode,
-        SectionType.LatestEpisode,
-        SectionType.NextUp
-    ]
-};
-
-export const MusicSuggestionsSectionsView: SectionsView = {
-    suggestionSections: [
-        SectionType.LatestMusic,
-        SectionType.FrequentlyPlayedMusic,
-        SectionType.RecentlyPlayedMusic
-    ]
-};
-
-export const ProgramSectionsView: SectionsView = {
-    programSections: [
-        SectionType.ActivePrograms,
-        SectionType.UpcomingEpisodes,
-        SectionType.UpcomingMovies,
-        SectionType.UpcomingSports,
-        SectionType.UpcomingKids,
-        SectionType.UpcomingNews
-    ]
-};
-
-export const RecordingsSectionsView: SectionsView = {
-    programSections: [
-        SectionType.LatestRecordings,
-        SectionType.RecordingFolders
-    ]
-};
-
-export const ScheduleSectionsView: SectionsView = {
-    programSections: [SectionType.ActiveRecordings],
-    isLiveTvUpcomingRecordings: true
-};
