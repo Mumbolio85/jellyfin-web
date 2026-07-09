@@ -38,19 +38,18 @@ const importController = (
     controller: string,
     view: string
 ) => {
-    switch (appType) {
-        case AppType.Dashboard:
-            return Promise.all([
-                import(/* webpackChunkName: "[request]" */ `../../apps/dashboard/controllers/${controller}`),
-                import(/* webpackChunkName: "[request]" */ `../../apps/dashboard/controllers/${view}`)
-                    .then(html => globalize.translateHtml(html))
-            ]);
-        default:
-            return Promise.all([
-                import(/* webpackChunkName: "[request]" */ `../../apps/legacy/controllers/${controller}`),
-                import(/* webpackChunkName: "[request]" */ `../../apps/legacy/controllers/${view}`)
-                    .then(html => globalize.translateHtml(html))
-            ]);
+    if (appType === AppType.Dashboard) {
+        return Promise.all([
+            import(/* webpackChunkName: "[request]" */ `../../apps/dashboard/controllers/${controller}`),
+            import(/* webpackChunkName: "[request]" */ `../../apps/dashboard/controllers/${view}`)
+                .then(html => globalize.translateHtml(html))
+        ]);
+    } else {
+        return Promise.all([
+            import(/* webpackChunkName: "[request]" */ `../../apps/legacy/controllers/${controller}`),
+            import(/* webpackChunkName: "[request]" */ `../../apps/legacy/controllers/${view}`)
+                .then(html => globalize.translateHtml(html))
+        ]);
     }
 };
 

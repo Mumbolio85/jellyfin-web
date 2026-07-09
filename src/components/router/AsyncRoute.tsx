@@ -18,10 +18,6 @@ const importRoute = (page: string, type: AppType) => {
     switch (type) {
         case AppType.Dashboard:
             return import(/* webpackChunkName: "[request]" */ `../../apps/dashboard/routes/${page}`);
-        case AppType.Experimental:
-            return import(/* webpackChunkName: "[request]" */ `../../apps/experimental/routes/${page}`);
-        case AppType.Stable:
-            return import(/* webpackChunkName: "[request]" */ `../../apps/stable/routes/${page}`);
         case AppType.Wizard:
             return import(/* webpackChunkName: "[request]" */ `../../apps/wizard/routes/${page}`);
         case AppType.Modern:
