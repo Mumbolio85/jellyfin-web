@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import WizardPage from 'apps/wizard/components/WizardPage';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import Stack from '@mui/material/Stack';
@@ -6,50 +6,64 @@ import Typography from '@mui/material/Typography';
 import globalize from 'lib/globalize';
 import Button from '@mui/material/Button';
 import Add from '@mui/icons-material/Add';
-import { useVirtualFolders } from 'apps/dashboard/features/libraries/api/useVirtualFolders';
-import Loading from 'components/loading/LoadingComponent';
 import Box from '@mui/material/Box';
 import Grid from '@mui/material/Grid';
-import LibraryCard from 'apps/dashboard/features/libraries/components/LibraryCard';
+import WizardLibraryCard from 'apps/wizard/components/WizardLibraryCard';
 import MediaLibraryCreator from 'components/mediaLibraryCreator/mediaLibraryCreator';
 import getCollectionTypeOptions from 'apps/dashboard/features/libraries/utils/collectionTypeOptions';
-import { queryClient } from 'utils/query/queryClient';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
+import toast from 'components/toast/toast';
+import { getWizardDraft, type WizardDraftLibrary } from 'apps/wizard/utils/wizardDraft';
+import { getPreviousStepPath, getNextStepPath } from 'apps/wizard/utils/wizardSteps';
 
 export const Component = () => {
-    const { data: virtualFolders, isPending: isVirtualFoldersPending } = useVirtualFolders();
     const navigate = useNavigate();
+    const [ libraries, setLibraries ] = useState<WizardDraftLibrary[]>(() => [ ...getWizardDraft().libraries ]);
 
     const showMediaLibraryCreator = useCallback(() => {
-        const mediaLibraryCreator = new MediaLibraryCreator({
+        // eslint-disable-next-line sonarjs/constructor-for-side-effects -- the dialog does its work via the onCreate callback below
+        new MediaLibraryCreator({
             collectionTypeOptions: getCollectionTypeOptions(),
-            refresh: true
-        }) as Promise<boolean>;
+            onCreate: (library: WizardDraftLibrary) => {
+                const isDuplicate = libraries.some(l => l.Name.toLowerCase() === library.Name.toLowerCase());
+                if (isDuplicate) {
+                    toast(globalize.translate('ErrorDefault'));
+                    return false;
+                }
 
-        void mediaLibraryCreator.then((hasChanges: boolean) => {
-            if (hasChanges) {
-                void queryClient.invalidateQueries({
-                    queryKey: ['VirtualFolders']
-                });
+                const updated = [ ...libraries, library ];
+                getWizardDraft().libraries = updated;
+                setLibraries(updated);
             }
         });
-    }, []);
+    }, [ libraries ]);
+
+    const onRenameLibrary = useCallback((index: number, newName: string) => {
+        const updated = libraries.map((l, i) => (i === index ? { ...l, Name: newName } : l));
+        getWizardDraft().libraries = updated;
+        setLibraries(updated);
+    }, [ libraries ]);
+
+    const onRemoveLibrary = useCallback((index: number) => {
+        const updated = libraries.filter((_, i) => i !== index);
+        getWizardDraft().libraries = updated;
+        setLibraries(updated);
+    }, [ libraries ]);
 
     const onPrevious = useCallback(() => {
-        navigate('/wizard/user');
+        navigate(getPreviousStepPath('library')!);
     }, [ navigate ]);
 
     const onNext = useCallback(() => {
-        navigate('/wizard/settings');
+        navigate(getNextStepPath('library')!);
     }, [ navigate ]);
-
-    if (isVirtualFoldersPending) return <Loading />;
 
     return (
         <WizardPage
             id='wizardLibraryPage'
             onPrevious={onPrevious}
             onNext={onNext}
+            nextLabel={libraries.length === 0 ? globalize.translate('Skip') : undefined}
         >
             <Stack spacing={3}>
                 <Stack direction='row' justifyContent={'space-between'} alignItems={'center'}>
@@ -75,15 +89,19 @@ export const Component = () => {
 
                 <Box>
                     <Grid container spacing={2}>
-                        {virtualFolders?.map(virtualFolder => (
+                        {libraries.map((library, index) => (
                             <Grid
-                                key={virtualFolder?.ItemId}
+                                key={library.Name}
                                 item
                                 xs={12}
                                 sm={4}
                             >
-                                <LibraryCard
-                                    virtualFolder={virtualFolder}
+                                <WizardLibraryCard
+                                    library={library}
+                                    // eslint-disable-next-line react/jsx-no-bind
+                                    onRename={newName => onRenameLibrary(index, newName)}
+                                    // eslint-disable-next-line react/jsx-no-bind
+                                    onRemove={() => onRemoveLibrary(index)}
                                 />
                             </Grid>
                         ))}
@@ -94,4 +112,4 @@ export const Component = () => {
     );
 };
 
-Component.displayName = 'StartupLibraryPage';
+Component.displayName = 'WizardLibraryPage';

@@ -10,9 +10,11 @@ import { AsyncRoute, toAsyncPageRoute } from 'components/router/AsyncRoute';
 const ROUTES: AsyncRoute[] = [
     { path: 'start', type: AppType.Wizard },
     { path: 'user', type: AppType.Wizard },
-    { path: 'library', type: AppType.Wizard },
-    { path: 'settings', type: AppType.Wizard },
+    { path: 'additional-users', type: AppType.Wizard },
     { path: 'remote', type: AppType.Wizard },
+    { path: 'advanced', type: AppType.Wizard },
+    { path: 'settings', type: AppType.Wizard },
+    { path: 'library', type: AppType.Wizard },
     { path: 'finish', type: AppType.Wizard }
 ];
 

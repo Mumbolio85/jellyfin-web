@@ -12,7 +12,8 @@ import Alert from '@mui/material/Alert';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import type { StartupConfigurationDto } from '@jellyfin/sdk/lib/generated-client/models/startup-configuration-dto';
-import { useUpdateInitialConfiguration } from 'apps/wizard/api/useUpdateInitialConfiguration';
+import { getWizardDraft } from 'apps/wizard/utils/wizardDraft';
+import { getPreviousStepPath, getNextStepPath } from 'apps/wizard/utils/wizardSteps';
 
 export const Component = () => {
     const {
@@ -31,7 +32,7 @@ export const Component = () => {
         isError: isCountriesError
     } = useCountries();
     const navigate = useNavigate();
-    const updateInitialConfig = useUpdateInitialConfiguration();
+    const draft = getWizardDraft().config;
     const [ data, setData ] = useState<StartupConfigurationDto>({});
 
     const onChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -42,23 +43,22 @@ export const Component = () => {
     }, [ data ]);
 
     const onPrevious = useCallback(() => {
-        navigate('/wizard/library');
+        navigate(getPreviousStepPath('settings')!);
     }, [ navigate ]);
 
     const onNext = useCallback(() => {
-        const newConfig = { ...startupConfig, ...data };
-        updateInitialConfig.mutate({ startupConfigurationDto: newConfig }, {
-            onSuccess: () => {
-                navigate('/wizard/remote');
-            }
+        Object.assign(getWizardDraft().config, {
+            PreferredMetadataLanguage: data.PreferredMetadataLanguage || draft.PreferredMetadataLanguage || startupConfig?.PreferredMetadataLanguage,
+            MetadataCountryCode: data.MetadataCountryCode || draft.MetadataCountryCode || startupConfig?.MetadataCountryCode
         });
-    }, [ navigate, startupConfig, data, updateInitialConfig ]);
+        navigate(getNextStepPath('settings')!);
+    }, [ navigate, startupConfig, draft, data ]);
 
     if (isStartupConfigurationPending || isCulturesPending || isCountriesPending) return <Loading />;
 
     return (
         <WizardPage
-            id='wizardLibraryPage'
+            id='wizardMetadataPage'
             onPrevious={onPrevious}
             onNext={onNext}
         >
@@ -74,7 +74,7 @@ export const Component = () => {
                         <TextField
                             name={'PreferredMetadataLanguage'}
                             label={globalize.translate('LabelLanguage')}
-                            value={data.PreferredMetadataLanguage || startupConfig.PreferredMetadataLanguage}
+                            value={data.PreferredMetadataLanguage || draft.PreferredMetadataLanguage || startupConfig.PreferredMetadataLanguage}
                             onChange={onChange}
                             select
                         >
@@ -89,7 +89,7 @@ export const Component = () => {
                         <TextField
                             name={'MetadataCountryCode'}
                             label={globalize.translate('LabelCountry')}
-                            value={data.MetadataCountryCode || startupConfig.MetadataCountryCode}
+                            value={data.MetadataCountryCode || draft.MetadataCountryCode || startupConfig.MetadataCountryCode}
                             onChange={onChange}
                             select
                         >
@@ -107,4 +107,4 @@ export const Component = () => {
     );
 };
 
-Component.displayName = 'StartupLibraryPage';
+Component.displayName = 'WizardMetadataPage';

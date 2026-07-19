@@ -4,6 +4,7 @@ import WizardPage from 'apps/wizard/components/WizardPage';
 import globalize from 'lib/globalize';
 import Stack from '@mui/material/Stack';
 import Button from '@mui/material/Button';
+import Link from '@mui/material/Link';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import TextField from '@mui/material/TextField';
 import { useLocalizationOptions } from 'apps/dashboard/features/settings/api/useLocalizationOptions';
@@ -12,8 +13,9 @@ import MenuItem from '@mui/material/MenuItem';
 import Alert from '@mui/material/Alert';
 import { useStartupConfiguration } from 'apps/wizard/api/useStartupConfiguration';
 import type { StartupConfigurationDto } from '@jellyfin/sdk/lib/generated-client/models/startup-configuration-dto';
-import { useUpdateInitialConfiguration } from 'apps/wizard/api/useUpdateInitialConfiguration';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
+import { getWizardDraft } from 'apps/wizard/utils/wizardDraft';
+import { getNextStepPath } from 'apps/wizard/utils/wizardSteps';
 
 export const Component = () => {
     const {
@@ -26,17 +28,17 @@ export const Component = () => {
         isPending: isLocalizationOptionsPending,
         isError: isLocalizationOptionsError
     } = useLocalizationOptions();
-    const updateInitialConfig = useUpdateInitialConfiguration();
     const navigate = useNavigate();
     const [ data, setData ] = useState<StartupConfigurationDto>({});
+    const draft = getWizardDraft().config;
 
     const onNext = useCallback(() => {
-        const newConfig: StartupConfigurationDto = { ...config, ...data };
-
-        updateInitialConfig.mutate({ startupConfigurationDto: newConfig }, {
-            onSuccess: () => navigate('/wizard/user')
+        Object.assign(getWizardDraft().config, {
+            ServerName: data?.ServerName || draft.ServerName || config?.ServerName,
+            UICulture: data?.UICulture || draft.UICulture || config?.UICulture
         });
-    }, [ config, data, updateInitialConfig, navigate ]);
+        navigate(getNextStepPath('start')!);
+    }, [ config, data, draft, navigate ]);
 
     const onChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         setData({
@@ -74,7 +76,7 @@ export const Component = () => {
 
                         <TextField
                             name='ServerName'
-                            value={data?.ServerName || config.ServerName || ''}
+                            value={data?.ServerName || draft.ServerName || config.ServerName || ''}
                             onChange={onChange}
                             label={globalize.translate('LabelServerName')}
                             helperText={globalize.translate('LabelServerNameHelp')}
@@ -84,13 +86,24 @@ export const Component = () => {
                             select
                             name='UICulture'
                             label={globalize.translate('LabelPreferredDisplayLanguage')}
-                            value={data?.UICulture || config.UICulture}
+                            value={data?.UICulture || draft.UICulture || config.UICulture}
                             onChange={onChange}
                         >
                             {languageOptions?.map((language) =>
                                 <MenuItem key={language.Name} value={language.Value || ''}>{language.Name}</MenuItem>
                             )}
                         </TextField>
+
+                        <Typography variant='caption'>
+                            {globalize.translate('LabelLanguageNotListed')}{' '}
+                            <Link
+                                component={RouterLink}
+                                to='https://translate.jellyfin.org/projects/jellyfin/jellyfin-web/'
+                                target='_blank'
+                            >
+                                {globalize.translate('ButtonHelpTranslateJellyfin')}
+                            </Link>
+                        </Typography>
                     </>
                 )}
             </Stack>

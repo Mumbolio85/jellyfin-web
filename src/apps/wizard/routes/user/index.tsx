@@ -11,6 +11,9 @@ import type { StartupUserDto } from '@jellyfin/sdk/lib/generated-client/models/s
 import TextField from '@mui/material/TextField';
 import Snackbar, { SnackbarCloseReason } from '@mui/material/Snackbar';
 import { useUpdateStartupUser } from 'apps/wizard/api/useUpdateStartupUser';
+import confirm from 'components/confirm/confirm';
+import { ServerConnections } from 'lib/jellyfin-apiclient';
+import { getPreviousStepPath, getNextStepPath } from 'apps/wizard/utils/wizardSteps';
 
 export const Component = () => {
     const { data: startupUser, isPending, isError } = useStartupUser();
@@ -40,26 +43,60 @@ export const Component = () => {
         setToastOpen(false);
     }, []);
 
+    const submit = useCallback((newConfig: StartupUserDto) => {
+        const name = newConfig.Name || '';
+        const password = newConfig.Password || '';
+
+        updateUser.mutate({ startupUserDto: newConfig }, {
+            onSuccess: () => {
+                const apiClient = ServerConnections.currentApiClient();
+                // Authenticate as the new admin so later wizard steps (network/encoding
+                // config, library folder browsing) have the rights they need.
+                Promise.resolve(apiClient?.getCurrentUser())
+                    .then(currentUser => {
+                        if (currentUser?.Name !== name) {
+                            return apiClient?.authenticateUserByName(name, password);
+                        }
+                    })
+                    .catch(() => apiClient?.authenticateUserByName(name, password))
+                    .then(() => navigate(getNextStepPath('user')!))
+                    .catch((err: unknown) => {
+                        console.error('[Wizard > User] failed to authenticate as new admin', err);
+                        setToastMessage(globalize.translate('ErrorDefault'));
+                        setToastOpen(true);
+                    });
+            }
+        });
+    }, [ updateUser, navigate ]);
+
     const onNext = useCallback(() => {
+        // Guard against double-submit while the mutation is already in flight.
+        if (updateUser.isPending) return;
+
         const newConfig: StartupUserDto = { ...startupUser, ...data };
 
-        if (!newConfig?.Password) {
-            setToastMessage(globalize.translate('PasswordMissingSaveError'));
-            setToastOpen(true);
-        } else if (newConfig?.Password !== passwordConfirm) {
+        if (newConfig?.Password && newConfig.Password !== passwordConfirm) {
             setToastMessage(globalize.translate('PasswordMatchError'));
             setToastOpen(true);
-        } else {
-            updateUser.mutate({ startupUserDto: newConfig }, {
-                onSuccess: () => {
-                    navigate('/wizard/library');
-                }
-            });
+            return;
         }
-    }, [ startupUser, data, passwordConfirm, updateUser, navigate ]);
+
+        if (!newConfig?.Password) {
+            confirm({
+                title: globalize.translate('HeaderAdminPasswordWarning'),
+                text: globalize.translate('MessageAdminPasswordBlankWarning'),
+                primary: 'delete'
+            }).then(() => submit(newConfig)).catch(() => {
+                // User chose to set a password instead
+            });
+            return;
+        }
+
+        submit(newConfig);
+    }, [ startupUser, data, passwordConfirm, updateUser.isPending, submit ]);
 
     const onPrevious = useCallback(() => {
-        navigate('/wizard/start');
+        navigate(getPreviousStepPath('user')!);
     }, [navigate]);
 
     if (isPending) return <Loading />;
@@ -95,7 +132,7 @@ export const Component = () => {
                         <TextField
                             name='Password'
                             label={globalize.translate('LabelPassword')}
-                            helperText={globalize.translate('PasswordRequiredForAdmin')}
+                            helperText={globalize.translate('SetupAdminPasswordNote')}
                             type='password'
                             value={data?.Password || startupUser?.Password || ''}
                             onChange={onChange}
@@ -109,7 +146,7 @@ export const Component = () => {
                             onChange={onPasswordConfirmChange}
                         />
 
-                        <Typography>{globalize.translate('MoreUsersCanBeAddedLater')}</Typography>
+                        <Typography>{globalize.translate('MoreUsersCanBeAddedNextStep')}</Typography>
                     </>
                 )}
             </Stack>

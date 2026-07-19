@@ -3,19 +3,24 @@ import Container from '@mui/material/Container';
 import Page, { type PageProps } from 'components/Page';
 import Stack from '@mui/material/Stack';
 import Button from '@mui/material/Button';
+import LinearProgress from '@mui/material/LinearProgress';
+import Typography from '@mui/material/Typography';
 import globalize from 'lib/globalize';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CheckIcon from '@mui/icons-material/Check';
-import { Form } from 'react-router-dom';
+import { Form, useLocation } from 'react-router-dom';
+import { getWizardStepNumber, TOTAL_WIZARD_STEPS } from 'apps/wizard/utils/wizardSteps';
 
 interface WizardPageProps extends PageProps {
     onNext?: () => void;
     onPrevious?: () => void;
     onFinish?: () => void;
+    nextLabel?: string;
 }
 
-const WizardPage = ({ children, onNext, onPrevious, onFinish, ...pageProps }: WizardPageProps) => {
+const WizardPage = ({ children, onNext, onPrevious, onFinish, nextLabel, ...pageProps }: WizardPageProps) => {
+    const location = useLocation();
     const onSubmit = useCallback((e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
 
@@ -25,6 +30,9 @@ const WizardPage = ({ children, onNext, onPrevious, onFinish, ...pageProps }: Wi
             onFinish();
         }
     }, [onNext, onFinish]);
+
+    const stepId = location.pathname.split('/').pop();
+    const stepNumber = getWizardStepNumber(stepId);
 
     return (
         <Page
@@ -56,7 +64,7 @@ const WizardPage = ({ children, onNext, onPrevious, onFinish, ...pageProps }: Wi
                                 endIcon={<ArrowForwardIcon />}
                                 type='submit'
                             >
-                                {globalize.translate('Next')}
+                                {nextLabel || globalize.translate('Next')}
                             </Button>
                         ) : null}
 
@@ -70,6 +78,19 @@ const WizardPage = ({ children, onNext, onPrevious, onFinish, ...pageProps }: Wi
                         ) : null}
                     </Stack>
                 </Form>
+
+                {stepNumber ? (
+                    <Stack spacing={0.5} mt={4} alignItems='center'>
+                        <Typography variant='caption' color='text.secondary'>
+                            {globalize.translate('LabelWizardStep', stepNumber, TOTAL_WIZARD_STEPS)}
+                        </Typography>
+                        <LinearProgress
+                            variant='determinate'
+                            value={(stepNumber / TOTAL_WIZARD_STEPS) * 100}
+                            sx={{ width: '12em', borderRadius: '0.4em' }}
+                        />
+                    </Stack>
+                ) : null}
             </Container>
         </Page>
     );
