@@ -27,7 +27,14 @@ export const ApiProvider: FC<PropsWithChildren<unknown>> = ({ children }) => {
     }), [ api, legacyApiClient, user ]);
 
     useEffect(() => {
-        ServerConnections.currentApiClient()
+        const currentApiClient = ServerConnections.currentApiClient();
+
+        // An anonymous client (no admin created yet) never resolves getCurrentUser(), so set it here too
+        if (currentApiClient) {
+            setLegacyApiClient(currentApiClient);
+        }
+
+        currentApiClient
             ?.getCurrentUser()
             .then(newUser => updateApiUser(undefined, newUser))
             .catch(err => {
@@ -47,12 +54,18 @@ export const ApiProvider: FC<PropsWithChildren<unknown>> = ({ children }) => {
             setUser(undefined);
         };
 
+        const updateApiClient = (_e: Event | undefined, newApiClient: ApiClient) => {
+            setLegacyApiClient(newApiClient);
+        };
+
         events.on(ServerConnections, 'localusersignedin', updateApiUser);
         events.on(ServerConnections, 'localusersignedout', resetApiUser);
+        events.on(ServerConnections, 'apiclientcreated', updateApiClient);
 
         return () => {
             events.off(ServerConnections, 'localusersignedin', updateApiUser);
             events.off(ServerConnections, 'localusersignedout', resetApiUser);
+            events.off(ServerConnections, 'apiclientcreated', updateApiClient);
         };
     }, [ setLegacyApiClient, setUser ]);
 
