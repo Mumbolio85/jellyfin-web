@@ -142,17 +142,8 @@ const sortOptionsMapping: SortOptionsMapping = {
         { label: 'Runtime', value: [ItemSortBy.Runtime, ItemSortBy.SortName] }
     ],
     [LibraryTab.Mixed]: [
-        { label: 'Name', value: [ItemSortBy.SortName] },
-        { label: 'OptionRandom', value: [ItemSortBy.Random] },
-        { label: 'OptionCommunityRating', value: [ItemSortBy.CommunityRating, ItemSortBy.SortName] },
-        { label: 'OptionCriticRating', value: [ItemSortBy.CriticRating, ItemSortBy.SortName] },
-        { label: 'OptionDateAdded', value: [ItemSortBy.DateCreated, ItemSortBy.SortName] },
-        { label: 'OptionDateEpisodeAdded', value: [ItemSortBy.DateLastContentAdded, ItemSortBy.SortName] },
-        { label: 'OptionDatePlayed', value: [ItemSortBy.DatePlayed, ItemSortBy.SortName] },
-        { label: 'OptionParentalRating', value: [ItemSortBy.OfficialRating, ItemSortBy.SortName] },
-        { label: 'OptionPlayCount', value: [ItemSortBy.PlayCount, ItemSortBy.SortName] },
-        { label: 'OptionReleaseDate', value: [ItemSortBy.ProductionYear, ItemSortBy.PremiereDate, ItemSortBy.SortName] },
-        { label: 'Runtime', value: [ItemSortBy.Runtime, ItemSortBy.SortName] }
+        ...movieOrFavoriteOptions,
+        { label: 'OptionDateEpisodeAdded', value: [ItemSortBy.DateLastContentAdded, ItemSortBy.SortName] }
     ]
 };
 
